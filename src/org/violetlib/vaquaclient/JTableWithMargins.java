@@ -36,10 +36,12 @@
 package org.violetlib.vaquaclient;
 
 import java.awt.Dimension;
+import java.awt.Insets;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+import java.util.Objects;
 import java.util.Vector;
 import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
@@ -64,7 +66,7 @@ public class JTableWithMargins
     private final TableLayoutManager layoutManager = new TableLayoutManager(this);
     private final MyPropertyChangeListener propertyChangeListener = new MyPropertyChangeListener();
 
-    private int margin;
+    private Insets margins;
 
     public JTableWithMargins()
     {
@@ -115,15 +117,15 @@ public class JTableWithMargins
 
     private void updateMargins()
     {
-        int margin = getSpecifiedMargin();
-        if (margin != this.margin) {
-            installMargin(margin);
+        Insets margins = getSpecifiedMargins();
+        if (!Objects.equals(margins, this.margins)) {
+            installMargins(margins);
         }
     }
 
-    private void installMargin(int m)
+    private void installMargins(Insets margins)
     {
-        margin = m;
+        this.margins = margins;
         revalidate();
         repaint();
         JTableHeader header = getTableHeader();
@@ -131,11 +133,17 @@ public class JTableWithMargins
             header.revalidate();
             header.repaint();
         }
-        marginChanged(margin);
+        marginsChanged(margins);
+        marginChanged(margins != null ? margins.left : 0);
     }
 
-    protected void marginChanged(int margin)
+    protected void marginsChanged(Insets margins)
     {
+    }
+
+    @Deprecated
+    protected void marginChanged(int m) {
+
     }
 
     @Override
@@ -145,7 +153,7 @@ public class JTableWithMargins
         if (isMinimumSizeSet()) {
             return d;
         }
-        return fixWidth(d);
+        return fixDimensions(d);
     }
 
     @Override
@@ -155,7 +163,7 @@ public class JTableWithMargins
         if (isPreferredSizeSet()) {
             return d;
         }
-        return fixWidth(d);
+        return fixDimensions(d);
     }
 
     @Override
@@ -165,26 +173,37 @@ public class JTableWithMargins
         if (isMaximumSizeSet()) {
             return d;
         }
-        return fixWidth(d);
+        return fixDimensions(d);
     }
 
-    private @NotNull Dimension fixWidth(@NotNull Dimension d)
+    private @NotNull Dimension fixDimensions(@NotNull Dimension d)
     {
-        int specifiedMargin = getSpecifiedMargin();
-        if (specifiedMargin == 0) {
+        Insets specifiedMargins = getSpecifiedMargins();
+        if (specifiedMargins == null) {
             return d;
         }
         // VAqua will return the correct width but only when it installs the margins.
         if (isVAquaInsetView()) {
             return d;
         }
-        return new Dimension(d.width + 2 * specifiedMargin, d.height);
+        return new Dimension(d.width + specifiedMargins.left + specifiedMargins.right, d.height + specifiedMargins.top + specifiedMargins.bottom);
     }
 
-    private int getSpecifiedMargin()
+    private Insets getSpecifiedMargins()
     {
         Object o = getClientProperty(INSET_VIEW_MARGIN_KEY);
-        return Math.max(0, o instanceof Integer ? (Integer) o : 0);
+        if (o == null) {
+            return null;
+        }
+
+        if (o instanceof Integer) {
+            int h = Math.max(0, o instanceof Integer ? (Integer) o : 0);
+            return new Insets(0, h, 0, h);
+        } else if (o instanceof Insets) {
+            return (Insets) o;
+        } else {
+            throw new IllegalStateException("Unexpected type for client property " + INSET_VIEW_MARGIN_KEY + ", expected Integer or Insets, found " + o.getClass().getName());
+        }
     }
 
     private boolean isVAquaInsetView()
@@ -212,18 +231,28 @@ public class JTableWithMargins
     @Override
     public int columnAtPoint(@NotNull Point point)
     {
-        if (margin > 0) {
-            point = new Point(point.x - margin, point.y);
+        if (margins != null) {
+            point = new Point(point.x - margins.left, point.y - margins.top);
         }
         return super.columnAtPoint(point);
+    }
+
+    @Override
+    public int rowAtPoint(Point point)
+    {
+        if (margins != null) {
+            point = new Point(point.x - margins.left, point.y - margins.top);
+        }
+        return super.rowAtPoint(point);
     }
 
     @Override
     public @NotNull Rectangle getCellRect(int row, int column, boolean includeSpacing)
     {
         Rectangle r = super.getCellRect(row, column, includeSpacing);
-        if (margin > 0 && columnModel.getColumnCount() > 0) {
-            r.x += margin;
+        if (margins != null && columnModel.getColumnCount() > 0) {
+            r.x += margins.left;
+            r.y += margins.top;
         }
         return r;
     }
@@ -296,12 +325,22 @@ public class JTableWithMargins
 
         public int getAvailableWidth()
         {
-            return table.getWidth() - 2 * table.margin;
+            return table.getWidth() - (table.margins != null ? table.margins.left + table.margins.right : 0);
+        }
+
+        public int getAvailableHeight()
+        {
+            return table.getHeight() - (table.margins != null ? table.margins.top + table.margins.bottom : 0);
         }
 
         public int getPreferredAvailableWidth()
         {
-            return table.getPreferredSize().width - 2 * table.margin;
+            return table.getPreferredSize().width - (table.margins != null ? table.margins.left + table.margins.right : 0);
+        }
+
+        public int getPreferredAvailableHeight()
+        {
+            return table.getPreferredSize().height - (table.margins != null ? table.margins.top + table.margins.bottom : 0);
         }
 
         private TableColumn getResizingColumn()
@@ -314,8 +353,11 @@ public class JTableWithMargins
         private void setWidthsFromPreferredWidths(final boolean inverse)
         {
             int totalWidth     = getAvailableWidth();
-            int totalPreferred = getPreferredAvailableWidth();
-            int target = !inverse ? totalWidth : totalPreferred;
+            int totalHeight    = getAvailableHeight();
+            int totalPreferredWidth = getPreferredAvailableWidth();
+            int totalPreferredHeight = getPreferredAvailableHeight();
+            int targetWidth = !inverse ? totalWidth : totalPreferredWidth;
+            int targetHeight = !inverse ? totalHeight : totalPreferredHeight;
 
             final TableColumnModel cm = table.getColumnModel();
             Resizable3 r = new Resizable3() {
@@ -340,7 +382,7 @@ public class JTableWithMargins
                 }
             };
 
-            adjustSizes(target, r, inverse);
+            adjustSizes(targetWidth, r, inverse);
         }
 
         // Distribute delta over columns, as indicated by the autoresize mode.
@@ -524,7 +566,7 @@ public class JTableWithMargins
         {
             if (table instanceof JTableWithMargins) {
                 JTableWithMargins t = (JTableWithMargins) table;
-                return t.margin;
+                return t.margins != null ? t.margins.left : 0;
             }
             return 0;
         }
